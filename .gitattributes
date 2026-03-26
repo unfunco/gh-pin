@@ -1,2 +1,2 @@
 * text=auto eol=lf
-go.sum
+go.sum -diff
