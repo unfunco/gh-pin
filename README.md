@@ -16,6 +16,8 @@ gh extension install unfunco/gh-pin
 gh pin
 ```
 
-Actions not found in the pin list are left unchanged.
+Actions not found in the pin list are left unchanged. After processing, if any
+actions are missing from the pin list, you will be prompted to open an issue
+requesting they be added.
 
 [pin list]: https://unfunco.github.io/toolbox/pins.json
