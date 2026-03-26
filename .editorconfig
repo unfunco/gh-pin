@@ -17,3 +17,6 @@ tab_width = 4
 
 [*.md]
 trim_trailing_whitespace = false
+
+[*.{yml,yaml}]
+ij_yaml_indent_sequence_value = false
