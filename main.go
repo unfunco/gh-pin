@@ -27,7 +27,7 @@ type Pin struct {
 
 const pinsURL = "https://unfunco.github.io/toolbox/pins.json"
 
-var usesPattern = regexp.MustCompile(`^(\s*uses:\s*)([^@\s]+)@(\S+)(.*)$`)
+var usesPattern = regexp.MustCompile(`^(\s*-?\s*uses:\s*)([^@\s]+)@(\S+)(.*)$`)
 
 func main() {
 	workflowDir := filepath.Join(".github", "workflows")
