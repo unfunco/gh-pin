@@ -1,13 +1,23 @@
 # gh-pin
 
-## Getting started
+GitHub CLI extension that pins GitHub Actions to commit SHAs in your workflows.
+It resolves each `uses:` reference against a curated [pin list], and replaces
+mutable tags with immutable SHAs.
 
-### Installation and usage
+## Installation
 
 ```bash
 gh extension install unfunco/gh-pin
 ```
 
+## Usage
+
 ```bash
 gh pin
 ```
+
+Actions not found in the pin list are left unchanged. After processing, if any
+actions are missing from the pin list, you will be prompted to open an issue
+requesting they be added.
+
+[pin list]: https://unfunco.github.io/toolbox/pins.json

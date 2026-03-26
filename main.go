@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,8 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/cli/go-gh/v2/pkg/api"
 )
 
 // PinsFile represents the top-level structure of the pins JSON file.
@@ -49,6 +54,8 @@ func main() {
 		pinMap[pin.Action] = pin
 	}
 
+	missingSet := make(map[string]struct{})
+
 	for _, entry := range entries {
 		name := entry.Name()
 		if !strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".yaml") {
@@ -56,8 +63,40 @@ func main() {
 		}
 
 		path := filepath.Join(workflowDir, name)
-		if err := processWorkflow(path, pinMap); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "Error processing %s: %v\n", name, err)
+		missing, procErr := processWorkflow(path, pinMap)
+		if procErr != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error processing %s: %v\n", name, procErr)
+		}
+		for _, action := range missing {
+			missingSet[action] = struct{}{}
+		}
+	}
+
+	if len(missingSet) == 0 {
+		return
+	}
+
+	missing := make([]string, 0, len(missingSet))
+	for action := range missingSet {
+		missing = append(missing, action)
+	}
+	sort.Strings(missing)
+
+	fmt.Println()
+	fmt.Println("The following actions are not in the pin list:")
+	for _, action := range missing {
+		fmt.Printf("  • %s\n", action)
+	}
+	fmt.Print("\nWould you like to open an issue to request they be added? [y/N] ")
+
+	reader := bufio.NewReader(os.Stdin)
+	answer, _ := reader.ReadString('\n')
+	answer = strings.TrimSpace(strings.ToLower(answer))
+
+	if answer == "y" || answer == "yes" {
+		if err := createIssue(missing); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error creating issue: %v\n", err)
+			os.Exit(1)
 		}
 	}
 }
@@ -88,14 +127,15 @@ func fetchPins() (*PinsFile, error) {
 	return &pins, nil
 }
 
-func processWorkflow(path string, pins map[string]Pin) error {
+func processWorkflow(path string, pins map[string]Pin) ([]string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	lines := strings.Split(string(content), "\n")
 	modified := false
+	var missing []string
 
 	for i, line := range lines {
 		matches := usesPattern.FindStringSubmatch(line)
@@ -110,6 +150,7 @@ func processWorkflow(path string, pins map[string]Pin) error {
 		pin, ok := pins[action]
 		if !ok {
 			_, _ = fmt.Fprintf(os.Stderr, "  ⚠ %s: %s not found in pins\n", filepath.Base(path), action)
+			missing = append(missing, action)
 			continue
 		}
 
@@ -122,8 +163,39 @@ func processWorkflow(path string, pins map[string]Pin) error {
 	}
 
 	if modified {
-		return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+		return missing, os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
 	}
 
+	return missing, nil
+}
+
+func createIssue(actions []string) error {
+	client, err := api.DefaultRESTClient()
+	if err != nil {
+		return fmt.Errorf("creating API client: %w", err)
+	}
+
+	body := "### Actions\n\n" + strings.Join(actions, "\n")
+
+	params := map[string]any{
+		"title":  "Add actions to pin list",
+		"body":   body,
+		"labels": []string{"pins"},
+	}
+
+	payload, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Errorf("marshalling issue body: %w", err)
+	}
+
+	var result struct {
+		HTMLURL string `json:"html_url"`
+	}
+
+	if err = client.Post("repos/unfunco/toolbox/issues", bytes.NewReader(payload), &result); err != nil {
+		return fmt.Errorf("creating issue: %w", err)
+	}
+
+	fmt.Printf("\nIssue created: %s\n", result.HTMLURL)
 	return nil
 }
