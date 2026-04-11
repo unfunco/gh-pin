@@ -10,21 +10,15 @@ on:
         description: Tag to publish
         required: false
         type: string
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: Tag to publish; defaults to the current ref or latest tag
-        required: false
-        type: string
+
+concurrency:
+  group: release-${{ inputs.release_tag || github.ref_name || github.run_id }}
+  cancel-in-progress: false
 
 permissions:
   attestations: write
   contents: write
   id-token: write
-
-concurrency:
-  group: release-${{ inputs.release_tag || github.ref_name || github.run_id }}
-  cancel-in-progress: false
 
 jobs:
   release:
