@@ -2,12 +2,12 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](https://opensource.org/licenses/MIT)
 
+> [!NOTE]
+> 🤖 Developed with AI assistance.
+
 GitHub CLI extension that pins GitHub Actions to commit SHAs in your workflows.
 It resolves each `uses:` reference against a curated [pin list], and replaces
 mutable tags with immutable SHAs.
-
-> [!NOTE]
-> 🤖 Developed with AI assistance.
 
 ## Getting started
 
@@ -32,8 +32,8 @@ open an issue so it can be added to the shared cache for everyone else.
 
 ## License
 
-© 2026 [daniel morris]\
-Made available under the terms of the [mit license].
+© 2026 [Daniel Morris]\
+Made available under the terms of the [Mit License].
 
 [daniel morris]: https://unfun.co
 [mit license]: LICENSE.md
