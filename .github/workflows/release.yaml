@@ -4,12 +4,36 @@ on:
   push:
     tags:
     - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Tag to publish
+        required: true
+        type: string
+      source_ref:
+        description: Commit SHA, branch, or tag to build from
+        required: false
+        type: string
+      create_tag_if_missing:
+        description: Create release_tag at source_ref before publishing
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       release_tag:
         description: Tag to publish
         required: false
         type: string
+      source_ref:
+        description: Commit SHA, branch, or tag to build from
+        required: false
+        type: string
+      create_tag_if_missing:
+        description: Create release_tag at source_ref before publishing
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: release-${{ inputs.release_tag || github.ref_name || github.run_id }}
@@ -28,7 +52,7 @@ jobs:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         fetch-depth: 0
-        ref: ${{ inputs.release_tag || github.ref }}
+        ref: ${{ inputs.source_ref || inputs.release_tag || github.ref }}
     - name: Determine release tag
       id: tag
       env:
@@ -43,20 +67,31 @@ jobs:
         fi
 
         echo "value=$tag" >> "$GITHUB_OUTPUT"
-    - name: Skip if release already exists
-      id: existing_release
+    - name: Ensure release tag exists
       env:
-        GH_TOKEN: ${{ github.token }}
         RELEASE_TAG: ${{ steps.tag.outputs.value }}
+        SOURCE_REF: ${{ inputs.source_ref }}
+        CREATE_TAG_IF_MISSING: ${{ inputs.create_tag_if_missing }}
       run: |
-        if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-          echo "exists=true" >> "$GITHUB_OUTPUT"
+        if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+          echo "Tag $RELEASE_TAG already exists on origin."
           exit 0
         fi
 
-        echo "exists=false" >> "$GITHUB_OUTPUT"
+        if [ "$CREATE_TAG_IF_MISSING" != "true" ]; then
+          echo "error: Tag $RELEASE_TAG does not exist. Re-run with create_tag_if_missing=true and source_ref set to the release commit." >&2
+          exit 1
+        fi
+
+        if [ -z "$SOURCE_REF" ]; then
+          echo "error: source_ref is required when create_tag_if_missing=true and tag $RELEASE_TAG does not exist." >&2
+          exit 1
+        fi
+
+        echo "Creating tag $RELEASE_TAG at $(git rev-parse HEAD)"
+        git tag "$RELEASE_TAG"
+        git push origin "refs/tags/$RELEASE_TAG"
     - uses: cli/gh-extension-precompile@v2
-      if: steps.existing_release.outputs.exists != 'true'
       with:
         generate_attestations: true
         go_version_file: go.mod
