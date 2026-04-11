@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.1](https://github.com/unfunco/gh-pin/compare/v0.1.0...v0.1.1) (2026-04-11)
+
+
+### 🐛 Bug fixes
+
+* Add manual release publishing ([#12](https://github.com/unfunco/gh-pin/issues/12)) ([fac464d](https://github.com/unfunco/gh-pin/commit/fac464d563b6263479566c40ec05f2ee355d4f66))
+* Add workflow write permissions to release workflow ([#13](https://github.com/unfunco/gh-pin/issues/13)) ([f15dc10](https://github.com/unfunco/gh-pin/commit/f15dc103a5632802a25380861a018768dce98762))
+* Remove invalid workflow permission from release workflow ([#14](https://github.com/unfunco/gh-pin/issues/14)) ([8907204](https://github.com/unfunco/gh-pin/commit/8907204a8b07ac1e9b7cd3f812620be571846283))
+
+
+### 🧹 Miscellaneous
+
+* Pin GitHub Actions ([#15](https://github.com/unfunco/gh-pin/issues/15)) ([de4cf95](https://github.com/unfunco/gh-pin/commit/de4cf95acf898163c7a34d70d66260d8c1bd7c1c))
+* Update URLs following repository rename ([#16](https://github.com/unfunco/gh-pin/issues/16)) ([46dde61](https://github.com/unfunco/gh-pin/commit/46dde61d53380b150dfe9e3c83c9edb6ba6dd804))
+
 ## 0.1.0 (2026-04-11)
 
 
