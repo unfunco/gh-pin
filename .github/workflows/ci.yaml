@@ -25,6 +25,24 @@ jobs:
     - name: Run unit tests
       run: go test -v ./...
 
+  release_pr:
+    name: Release PR?
+    needs: [ verify ]
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Release PR?
+      id: release
+      uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+      with:
+        config-file: .github/release-please-config.json
+        manifest-file: .github/release-please-manifest.json
+        skip-github-release: true
+        token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
   release:
     name: Release?
     needs: [ verify ]
@@ -43,7 +61,7 @@ jobs:
       with:
         config-file: .github/release-please-config.json
         manifest-file: .github/release-please-manifest.json
-        skip-github-release: true
+        skip-github-pull-request: true
         token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
   publish:
@@ -57,3 +75,4 @@ jobs:
     uses: ./.github/workflows/release.yaml
     with:
       release_tag: ${{ needs.release.outputs.tag_name }}
+      source_ref: ${{ github.sha }}
