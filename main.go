@@ -3,10 +3,13 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,169 +20,396 @@ import (
 	"github.com/cli/go-gh/v2/pkg/api"
 )
 
-// PinsFile represents the top-level structure of the pins JSON file.
-type PinsFile struct {
-	Actions []Pin `json:"actions"`
+const (
+	pinsURL           = "https://unfunco.github.io/toolbox/pins.json"
+	issueEndpoint     = "repos/unfunco/toolbox/issues"
+	workflowDirectory = ".github/workflows"
+	maxPinsSize       = 1 << 20
+	httpTimeout       = 10 * time.Second
+)
+
+var (
+	usesPattern = regexp.MustCompile(`^(\s*-?\s*uses:\s*)([^@\s]+)@([^\s#]+)(\s*(?:#.*)?)$`)
+	shaPattern  = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+)
+
+type pinsFile struct {
+	Actions []pin `json:"actions"`
 }
 
-// Pin represents a pinned GitHub Action with its commit SHA and tag.
-type Pin struct {
+type pin struct {
 	Action      string    `json:"action"`
 	Tag         string    `json:"tag"`
 	SHA         string    `json:"sha"`
 	PublishedAt time.Time `json:"published_at"`
 }
 
-const pinsURL = "https://unfunco.github.io/toolbox/pins.json"
+type githubClient interface {
+	DoWithContext(ctx context.Context, method, path string, body io.Reader, response any) error
+	Post(path string, body io.Reader, response any) error
+}
 
-var usesPattern = regexp.MustCompile(`^(\s*-?\s*uses:\s*)([^@\s]+)@(\S+)(.*)$`)
+type app struct {
+	stdin  io.Reader
+	stdout io.Writer
+	stderr io.Writer
+
+	httpClient *http.Client
+	github     githubClient
+}
+
+type resolvedPin struct {
+	sha    string
+	label  string
+	source string
+}
+
+type missingAction struct {
+	Action string
+	Ref    string
+}
+
+func (m missingAction) key() string {
+	return m.Action + "@" + m.Ref
+}
 
 func main() {
-	workflowDir := filepath.Join(".github", "workflows")
-
-	entries, err := os.ReadDir(workflowDir)
-	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Error reading workflows directory: %v\n", err)
+	if err := run(context.Background(), os.Stdin, os.Stdout, os.Stderr); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "gh pin: %v\n", err)
 		os.Exit(1)
 	}
+}
 
-	pins, err := fetchPins()
+func run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) error {
+	client, err := api.DefaultRESTClient()
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Error fetching pins: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("creating GitHub client: %w", err)
 	}
 
-	pinMap := make(map[string]Pin)
+	a := app{
+		stdin:      stdin,
+		stdout:     stdout,
+		stderr:     stderr,
+		httpClient: &http.Client{Timeout: httpTimeout},
+		github:     client,
+	}
+
+	return a.run(ctx)
+}
+
+func (a app) run(ctx context.Context) error {
+	entries, err := os.ReadDir(workflowDirectory)
+	if err != nil {
+		return fmt.Errorf("reading workflows directory: %w", err)
+	}
+
+	pins, err := a.fetchPins(ctx)
+	if err != nil {
+		return err
+	}
+
+	pinMap := make(map[string]pin, len(pins.Actions))
 	for _, pin := range pins.Actions {
 		pinMap[pin.Action] = pin
 	}
 
-	missingSet := make(map[string]struct{})
+	missing := make(map[string]missingAction)
+	var errs []error
 
 	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".yaml") {
+		if entry.IsDir() || !isWorkflowFile(entry.Name()) {
 			continue
 		}
 
-		path := filepath.Join(workflowDir, name)
-		missing, procErr := processWorkflow(path, pinMap)
-		if procErr != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "Error processing %s: %v\n", name, procErr)
+		path := filepath.Join(workflowDirectory, entry.Name())
+		actions, err := a.processWorkflow(ctx, path, pinMap)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", entry.Name(), err))
 		}
-		for _, action := range missing {
-			missingSet[action] = struct{}{}
-		}
-	}
 
-	if len(missingSet) == 0 {
-		return
-	}
-
-	missing := make([]string, 0, len(missingSet))
-	for action := range missingSet {
-		missing = append(missing, action)
-	}
-	sort.Strings(missing)
-
-	fmt.Println()
-	fmt.Println("The following actions are not in the pin list:")
-	for _, action := range missing {
-		fmt.Printf("  • %s\n", action)
-	}
-	fmt.Print("\nWould you like to open an issue to request they be added? [y/N] ")
-
-	reader := bufio.NewReader(os.Stdin)
-	answer, _ := reader.ReadString('\n')
-	answer = strings.TrimSpace(strings.ToLower(answer))
-
-	if answer == "y" || answer == "yes" {
-		if err := createIssue(missing); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "Error creating issue: %v\n", err)
-			os.Exit(1)
+		for _, action := range actions {
+			missing[action.key()] = action
 		}
 	}
+
+	if len(missing) > 0 {
+		if err := a.offerIssue(sortedMissingActions(missing)); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
-func fetchPins() (*PinsFile, error) {
-	resp, err := http.Get(pinsURL)
+func (a app) fetchPins(ctx context.Context) (*pinsFile, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pinsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating pins request: %w", err)
+	}
+
+	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching pins: %w", err)
 	}
-
-	//goland:noinspection GoUnhandledErrorResult
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("fetching pins: HTTP %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
-	}
-
-	var pins PinsFile
-	if err = json.Unmarshal(body, &pins); err != nil {
+	var pins pinsFile
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxPinsSize)).Decode(&pins); err != nil {
 		return nil, fmt.Errorf("parsing pins: %w", err)
 	}
 
 	return &pins, nil
 }
 
-func processWorkflow(path string, pins map[string]Pin) ([]string, error) {
+func (a app) processWorkflow(ctx context.Context, path string, pins map[string]pin) ([]missingAction, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading workflow: %w", err)
 	}
 
 	lines := strings.Split(string(content), "\n")
 	modified := false
-	var missing []string
+	missing := make(map[string]missingAction)
+	name := filepath.Base(path)
 
 	for i, line := range lines {
-		matches := usesPattern.FindStringSubmatch(line)
-		if matches == nil {
-			continue
-		}
-
-		prefix := matches[1] // leading whitespace + "uses: "
-		action := matches[2] // e.g. "actions/checkout"
-		oldRef := matches[3] // e.g. "v6" or a SHA
-
-		pin, ok := pins[action]
+		prefix, action, ref, ok := parseUsesLine(line)
 		if !ok {
-			_, _ = fmt.Fprintf(os.Stderr, "  ⚠ %s: %s not found in pins\n", filepath.Base(path), action)
-			missing = append(missing, action)
 			continue
 		}
 
-		newLine := fmt.Sprintf("%s%s@%s # %s", prefix, action, pin.SHA, pin.Tag)
-		if lines[i] != newLine {
-			fmt.Printf("  ✓ %s: %s@%s → %s\n", filepath.Base(path), action, oldRef, pin.Tag)
-			lines[i] = newLine
-			modified = true
+		repo, ok := actionRepository(action)
+		if !ok {
+			continue
 		}
+
+		resolved, needsIssue, err := a.resolveAction(ctx, pins, repo, action, ref)
+		if err != nil {
+			_, _ = fmt.Fprintf(a.stderr, "  ⚠ %s: %s@%s: %v\n", name, action, ref, err)
+			missingRef := missingAction{Action: action, Ref: ref}
+			missing[missingRef.key()] = missingRef
+			continue
+		}
+
+		if needsIssue {
+			missingRef := missingAction{Action: action, Ref: ref}
+			missing[missingRef.key()] = missingRef
+		}
+
+		newLine := formatUsesLine(prefix, action, resolved.sha, resolved.label)
+		if line == newLine {
+			continue
+		}
+
+		lines[i] = newLine
+		modified = true
+
+		_, _ = fmt.Fprintf(
+			a.stdout,
+			"  ✓ %s: %s@%s pinned to %s (%s)\n",
+			name,
+			action,
+			ref,
+			shortSHA(resolved.sha),
+			resolved.source,
+		)
 	}
 
-	if modified {
-		return missing, os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+	if !modified {
+		return sortedMissingActions(missing), nil
 	}
 
-	return missing, nil
+	info, err := os.Stat(path)
+	if err != nil {
+		return sortedMissingActions(missing), fmt.Errorf("stat workflow: %w", err)
+	}
+
+	if err := writeFileAtomically(path, []byte(strings.Join(lines, "\n")), info.Mode().Perm()); err != nil {
+		return sortedMissingActions(missing), fmt.Errorf("writing workflow: %w", err)
+	}
+
+	return sortedMissingActions(missing), nil
 }
 
-func createIssue(actions []string) error {
-	client, err := api.DefaultRESTClient()
-	if err != nil {
-		return fmt.Errorf("creating API client: %w", err)
+func (a app) resolveAction(ctx context.Context, pins map[string]pin, repo, action, ref string) (resolvedPin, bool, error) {
+	if pin, ok := pins[action]; ok && looksLikeSHA(pin.SHA) {
+		label := pin.Tag
+		if label == "" {
+			label = ref
+		}
+		return resolvedPin{
+			sha:    pin.SHA,
+			label:  label,
+			source: label + " via pin list",
+		}, false, nil
 	}
 
-	body := "### Actions\n\n" + strings.Join(actions, "\n")
+	if looksLikeSHA(ref) {
+		return resolvedPin{
+			sha:    ref,
+			label:  "",
+			source: "already pinned",
+		}, false, nil
+	}
+
+	sha, err := a.lookupCommitSHA(ctx, repo, action, ref)
+	if err != nil {
+		return resolvedPin{}, true, err
+	}
+
+	return resolvedPin{
+		sha:    sha,
+		label:  ref,
+		source: ref + " via live GitHub lookup",
+	}, true, nil
+}
+
+func (a app) lookupCommitSHA(ctx context.Context, repo, action, ref string) (string, error) {
+	path := fmt.Sprintf("repos/%s/commits/%s", repo, url.PathEscape(ref))
+
+	var response struct {
+		SHA string `json:"sha"`
+	}
+
+	if err := a.github.DoWithContext(ctx, http.MethodGet, path, nil, &response); err != nil {
+		return "", fmt.Errorf("resolving %s: %w", action, err)
+	}
+	if response.SHA == "" {
+		return "", fmt.Errorf("resolving %s: empty SHA from GitHub", action)
+	}
+
+	return response.SHA, nil
+}
+
+func (a app) offerIssue(actions []missingAction) error {
+	if len(actions) == 0 {
+		return nil
+	}
+
+	_, _ = fmt.Fprintln(a.stdout)
+	_, _ = fmt.Fprintln(a.stdout, "These actions are not yet in the pin list:")
+	for _, action := range actions {
+		_, _ = fmt.Fprintf(a.stdout, "  • %s@%s\n", action.Action, action.Ref)
+	}
+	_, _ = fmt.Fprint(a.stdout, "\nOpen an issue so they can be cached for faster future runs? [y/N] ")
+
+	reader := bufio.NewReader(a.stdin)
+	answer, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("reading answer: %w", err)
+	}
+
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	if answer != "y" && answer != "yes" {
+		return nil
+	}
+
+	return createIssue(a.github, a.stdout, actions)
+}
+
+func parseUsesLine(line string) (prefix, action, ref string, ok bool) {
+	matches := usesPattern.FindStringSubmatch(line)
+	if matches == nil {
+		return "", "", "", false
+	}
+	return matches[1], matches[2], matches[3], true
+}
+
+func actionRepository(action string) (string, bool) {
+	if strings.HasPrefix(action, "./") || strings.HasPrefix(action, "../") || strings.HasPrefix(action, "docker://") {
+		return "", false
+	}
+
+	parts := strings.Split(action, "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", false
+	}
+
+	return parts[0] + "/" + parts[1], true
+}
+
+func looksLikeSHA(ref string) bool {
+	return shaPattern.MatchString(ref)
+}
+
+func formatUsesLine(prefix, action, sha, label string) string {
+	line := prefix + action + "@" + sha
+	if label == "" {
+		return line
+	}
+	return line + " # " + label
+}
+
+func shortSHA(sha string) string {
+	if len(sha) <= 12 {
+		return sha
+	}
+	return sha[:12]
+}
+
+func isWorkflowFile(name string) bool {
+	return strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".yaml")
+}
+
+func sortedMissingActions(set map[string]missingAction) []missingAction {
+	actions := make([]missingAction, 0, len(set))
+	for _, action := range set {
+		actions = append(actions, action)
+	}
+
+	sort.Slice(actions, func(i, j int) bool {
+		if actions[i].Action == actions[j].Action {
+			return actions[i].Ref < actions[j].Ref
+		}
+		return actions[i].Action < actions[j].Action
+	})
+
+	return actions
+}
+
+func writeFileAtomically(path string, data []byte, perm os.FileMode) (err error) {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+
+	tmpName := tmp.Name()
+	defer func() {
+		if err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if err := tmp.Chmod(perm); err != nil {
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	return os.Rename(tmpName, path)
+}
+
+func createIssue(client githubClient, out io.Writer, actions []missingAction) error {
+	var body strings.Builder
+	body.WriteString("### Actions\n\n")
+	body.WriteString("These actions were resolved live by `gh pin`. Adding them to the shared pin list will speed up future runs for everyone.\n\n")
+
+	for _, action := range actions {
+		_, _ = fmt.Fprintf(&body, "- `%s@%s`\n", action.Action, action.Ref)
+	}
 
 	params := map[string]any{
 		"title":  "Add actions to pin list",
-		"body":   body,
+		"body":   body.String(),
 		"labels": []string{"pins"},
 	}
 
@@ -192,10 +422,10 @@ func createIssue(actions []string) error {
 		HTMLURL string `json:"html_url"`
 	}
 
-	if err = client.Post("repos/unfunco/toolbox/issues", bytes.NewReader(payload), &result); err != nil {
+	if err := client.Post(issueEndpoint, bytes.NewReader(payload), &result); err != nil {
 		return fmt.Errorf("creating issue: %w", err)
 	}
 
-	fmt.Printf("\nIssue created: %s\n", result.HTMLURL)
+	_, _ = fmt.Fprintf(out, "\nIssue created: %s\n", result.HTMLURL)
 	return nil
 }
