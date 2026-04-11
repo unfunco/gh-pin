@@ -43,7 +43,6 @@ permissions:
   attestations: write
   contents: write
   id-token: write
-  workflows: write
 
 jobs:
   publish:
