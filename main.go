@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	pinsURL           = "https://unfunco.github.io/toolbox/pins.json"
-	issueEndpoint     = "repos/unfunco/toolbox/issues"
+	pinsURL           = "https://unfunco.github.io/github-actions-pins/pins.json"
+	issueEndpoint     = "repos/unfunco/github-actions-pins/issues"
 	workflowDirectory = ".github/workflows"
 	maxPinsSize       = 1 << 20
 	httpTimeout       = 10 * time.Second
