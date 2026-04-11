@@ -91,7 +91,7 @@ jobs:
         echo "Creating tag $RELEASE_TAG at $(git rev-parse HEAD)"
         git tag "$RELEASE_TAG"
         git push origin "refs/tags/$RELEASE_TAG"
-    - uses: cli/gh-extension-precompile@v2
+    - uses: cli/gh-extension-precompile@9e2237c30f869ad3bcaed6a4be2cd43564dd421b # v2.1.0
       with:
         generate_attestations: true
         go_version_file: go.mod
