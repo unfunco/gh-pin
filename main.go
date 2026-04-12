@@ -55,6 +55,8 @@ type app struct {
 	stderr io.Writer
 
 	httpClient *http.Client
+	pinsURL    string
+	userAgent  string
 	github     githubClient
 }
 
@@ -91,6 +93,8 @@ func run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) error {
 		stdout:     stdout,
 		stderr:     stderr,
 		httpClient: &http.Client{Timeout: httpTimeout},
+		pinsURL:    pinsURL,
+		userAgent:  formatUserAgent(version),
 		github:     client,
 	}
 
@@ -142,10 +146,20 @@ func (a app) run(ctx context.Context) error {
 }
 
 func (a app) fetchPins(ctx context.Context) (*pinsFile, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pinsURL, nil)
+	endpoint := a.pinsURL
+	if endpoint == "" {
+		endpoint = pinsURL
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating pins request: %w", err)
 	}
+	userAgent := a.userAgent
+	if userAgent == "" {
+		userAgent = formatUserAgent(version)
+	}
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
