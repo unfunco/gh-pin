@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	pinsURL           = "https://unfunco.github.io/github-actions-pins/pins.json"
+	pinsURL           = "https://unfun.co/pins.json"
 	issueEndpoint     = "repos/unfunco/github-actions-pins/issues"
 	workflowDirectory = ".github/workflows"
 	maxPinsSize       = 1 << 20

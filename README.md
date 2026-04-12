@@ -40,4 +40,4 @@ Made available under the terms of the [MIT License].
 
 [daniel morris]: https://unfun.co
 [mit license]: LICENSE.md
-[pin list]: https://unfunco.github.io/toolbox/pins.json
+[pin list]: https://unfun.co/pins.json
