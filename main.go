@@ -28,10 +28,7 @@ const (
 	httpTimeout       = 10 * time.Second
 )
 
-var (
-	usesPattern = regexp.MustCompile(`^(\s*-?\s*uses:\s*)([^@\s]+)@([^\s#]+)(\s*(?:#.*)?)$`)
-	shaPattern  = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
-)
+var shaPattern = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 
 type pinsFile struct {
 	Actions []pin `json:"actions"`
@@ -46,7 +43,6 @@ type pin struct {
 
 type githubClient interface {
 	DoWithContext(ctx context.Context, method, path string, body io.Reader, response any) error
-	Post(path string, body io.Reader, response any) error
 }
 
 type app struct {
@@ -112,10 +108,7 @@ func (a app) run(ctx context.Context) error {
 		return err
 	}
 
-	pinMap := make(map[string]pin, len(pins.Actions))
-	for _, pin := range pins.Actions {
-		pinMap[pin.Action] = pin
-	}
+	pinMap := indexPins(pins.Actions)
 
 	missing := make(map[string]missingAction)
 	var errs []error
@@ -137,7 +130,7 @@ func (a app) run(ctx context.Context) error {
 	}
 
 	if len(missing) > 0 {
-		if err := a.offerIssue(sortedMissingActions(missing)); err != nil {
+		if err := a.offerIssue(ctx, sortedMissingActions(missing)); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -155,19 +148,16 @@ func (a app) fetchPins(ctx context.Context) (*pinsFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating pins request: %w", err)
 	}
-	userAgent := a.userAgent
-	if userAgent == "" {
-		userAgent = formatUserAgent(version)
-	}
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", a.userAgentOrDefault())
 
-	resp, err := a.httpClient.Do(req)
+	resp, err := a.httpClientOrDefault().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching pins: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil, fmt.Errorf("fetching pins: HTTP %d", resp.StatusCode)
 	}
 
@@ -201,9 +191,9 @@ func (a app) processWorkflow(ctx context.Context, path string, pins map[string]p
 			continue
 		}
 
-		resolved, needsIssue, err := a.resolveAction(ctx, pins, repo, action, ref)
-		if err != nil {
-			_, _ = fmt.Fprintf(a.stderr, "  ⚠ %s: %s@%s: %v\n", name, action, ref, err)
+		resolved, needsIssue, resolveErr := a.resolveAction(ctx, pins, repo, action, ref)
+		if resolveErr != nil {
+			_, _ = fmt.Fprintf(a.stderr, "  ⚠ %s: %s@%s: %v\n", name, action, ref, resolveErr)
 			missingRef := missingAction{Action: action, Ref: ref}
 			missing[missingRef.key()] = missingRef
 			continue
@@ -250,15 +240,19 @@ func (a app) processWorkflow(ctx context.Context, path string, pins map[string]p
 }
 
 func (a app) resolveAction(ctx context.Context, pins map[string]pin, repo, action, ref string) (resolvedPin, bool, error) {
-	if pin, ok := pins[action]; ok && looksLikeSHA(pin.SHA) {
-		label := pin.Tag
+	if pinEntry, ok := pins[action]; ok {
+		label := pinEntry.Tag
 		if label == "" {
 			label = ref
 		}
+		displayLabel := sanitizeLabel(label)
+		if displayLabel == "" {
+			displayLabel = ref
+		}
 		return resolvedPin{
-			sha:    pin.SHA,
+			sha:    pinEntry.SHA,
 			label:  label,
-			source: label + " via pin list",
+			source: displayLabel + " via pin list",
 		}, false, nil
 	}
 
@@ -278,7 +272,7 @@ func (a app) resolveAction(ctx context.Context, pins map[string]pin, repo, actio
 	return resolvedPin{
 		sha:    sha,
 		label:  ref,
-		source: ref + " via live GitHub lookup",
+		source: sanitizeLabel(ref) + " via live GitHub lookup",
 	}, true, nil
 }
 
@@ -292,14 +286,14 @@ func (a app) lookupCommitSHA(ctx context.Context, repo, action, ref string) (str
 	if err := a.github.DoWithContext(ctx, http.MethodGet, path, nil, &response); err != nil {
 		return "", fmt.Errorf("resolving %s: %w", action, err)
 	}
-	if response.SHA == "" {
-		return "", fmt.Errorf("resolving %s: empty SHA from GitHub", action)
+	if !looksLikeSHA(response.SHA) {
+		return "", fmt.Errorf("resolving %s: invalid SHA from GitHub", action)
 	}
 
 	return response.SHA, nil
 }
 
-func (a app) offerIssue(actions []missingAction) error {
+func (a app) offerIssue(ctx context.Context, actions []missingAction) error {
 	if len(actions) == 0 {
 		return nil
 	}
@@ -311,7 +305,12 @@ func (a app) offerIssue(actions []missingAction) error {
 	}
 	_, _ = fmt.Fprint(a.stdout, "\nOpen an issue so they can be cached for faster future runs? [y/N] ")
 
-	reader := bufio.NewReader(a.stdin)
+	input := a.stdin
+	if input == nil {
+		input = strings.NewReader("")
+	}
+
+	reader := bufio.NewReader(input)
 	answer, err := reader.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("reading answer: %w", err)
@@ -322,15 +321,37 @@ func (a app) offerIssue(actions []missingAction) error {
 		return nil
 	}
 
-	return createIssue(a.github, a.stdout, actions)
+	return createIssue(ctx, a.github, a.stdout, actions)
 }
 
 func parseUsesLine(line string) (prefix, action, ref string, ok bool) {
-	matches := usesPattern.FindStringSubmatch(line)
-	if matches == nil {
+	before, after, found := strings.Cut(line, "uses:")
+	if !found {
 		return "", "", "", false
 	}
-	return matches[1], matches[2], matches[3], true
+
+	trimmedBefore := strings.TrimSpace(before)
+	if trimmedBefore != "" && trimmedBefore != "-" {
+		return "", "", "", false
+	}
+
+	ws := len(after) - len(strings.TrimLeft(after, " \t"))
+	prefix = before + "uses:" + after[:ws]
+
+	value, _, _ := strings.Cut(strings.TrimSpace(after), "#")
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 {
+		if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
+			value = value[1 : len(value)-1]
+		}
+	}
+
+	action, ref, ok = strings.Cut(value, "@")
+	if !ok || action == "" || ref == "" {
+		return "", "", "", false
+	}
+
+	return prefix, action, ref, true
 }
 
 func actionRepository(action string) (string, bool) {
@@ -352,6 +373,7 @@ func looksLikeSHA(ref string) bool {
 
 func formatUsesLine(prefix, action, sha, label string) string {
 	line := prefix + action + "@" + sha
+	label = sanitizeLabel(label)
 	if label == "" {
 		return line
 	}
@@ -385,6 +407,46 @@ func sortedMissingActions(set map[string]missingAction) []missingAction {
 	return actions
 }
 
+func indexPins(actions []pin) map[string]pin {
+	index := make(map[string]pin, len(actions))
+	for _, pinEntry := range actions {
+		if pinEntry.Action == "" || !looksLikeSHA(pinEntry.SHA) {
+			continue
+		}
+		index[pinEntry.Action] = pinEntry
+	}
+	return index
+}
+
+func sanitizeLabel(label string) string {
+	label = strings.ReplaceAll(label, "#", "")
+	label = strings.Join(strings.Fields(label), " ")
+
+	var b strings.Builder
+	b.Grow(len(label))
+	for _, r := range label {
+		if r < 0x20 || r == 0x7f {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func (a app) httpClientOrDefault() *http.Client {
+	if a.httpClient != nil {
+		return a.httpClient
+	}
+	return &http.Client{Timeout: httpTimeout}
+}
+
+func (a app) userAgentOrDefault() string {
+	if a.userAgent != "" {
+		return a.userAgent
+	}
+	return formatUserAgent(version)
+}
+
 func writeFileAtomically(path string, data []byte, perm os.FileMode) (err error) {
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -392,9 +454,12 @@ func writeFileAtomically(path string, data []byte, perm os.FileMode) (err error)
 	}
 
 	tmpName := tmp.Name()
+	closed := false
 	defer func() {
 		if err != nil {
-			_ = tmp.Close()
+			if !closed {
+				_ = tmp.Close()
+			}
 			_ = os.Remove(tmpName)
 		}
 	}()
@@ -408,14 +473,15 @@ func writeFileAtomically(path string, data []byte, perm os.FileMode) (err error)
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	closed = true
 
 	return os.Rename(tmpName, path)
 }
 
-func createIssue(client githubClient, out io.Writer, actions []missingAction) error {
+func createIssue(ctx context.Context, client githubClient, out io.Writer, actions []missingAction) error {
 	var body strings.Builder
 	body.WriteString("### Actions\n\n")
-	body.WriteString("These actions were resolved live by `gh pin`. Adding them to the shared pin list will speed up future runs for everyone.\n\n")
+	body.WriteString("These actions were resolved live by `gh pin`.\n\n")
 
 	for _, action := range actions {
 		_, _ = fmt.Fprintf(&body, "- `%s@%s`\n", action.Action, action.Ref)
@@ -436,8 +502,12 @@ func createIssue(client githubClient, out io.Writer, actions []missingAction) er
 		HTMLURL string `json:"html_url"`
 	}
 
-	if err := client.Post(issueEndpoint, bytes.NewReader(payload), &result); err != nil {
+	if err := client.DoWithContext(ctx, http.MethodPost, issueEndpoint, bytes.NewReader(payload), &result); err != nil {
 		return fmt.Errorf("creating issue: %w", err)
+	}
+
+	if result.HTMLURL == "" {
+		return errors.New("creating issue: empty HTML URL from GitHub")
 	}
 
 	_, _ = fmt.Fprintf(out, "\nIssue created: %s\n", result.HTMLURL)
