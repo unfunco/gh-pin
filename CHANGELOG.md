@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.3](https://github.com/unfunco/gh-pin/compare/v0.1.2...v0.1.3) (2026-04-18)
+
+
+### 🐛 Bug fixes
+
+* allow merged release PRs to publish releases ([e6b91fb](https://github.com/unfunco/gh-pin/commit/e6b91fb64a1784a3915f7a235a20f0dadd46cf0c))
+* Use valid Go build flags in release workflow ([69fb655](https://github.com/unfunco/gh-pin/commit/69fb6557c7e164106c532777af62275759cf1794))
+
 ## [0.1.2](https://github.com/unfunco/gh-pin/compare/v0.1.1...v0.1.2) (2026-04-18)
 
 
