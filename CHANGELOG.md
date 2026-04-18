@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/unfunco/gh-pin/compare/v0.1.3...v0.1.4) (2026-04-18)
+
+
+### 🐛 Bug fixes
+
+* Publish draft releases after uploading assets ([0ae664f](https://github.com/unfunco/gh-pin/commit/0ae664f8136d3d9912b02cbdb6ccbd3863af5694))
+
 ## [0.1.3](https://github.com/unfunco/gh-pin/compare/v0.1.2...v0.1.3) (2026-04-18)
 
 
