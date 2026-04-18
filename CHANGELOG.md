@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/unfunco/gh-pin/compare/v0.1.4...v0.1.5) (2026-04-18)
+
+
+### 🐛 Bug fixes
+
+* Create missing release tags before publishing ([d752058](https://github.com/unfunco/gh-pin/commit/d75205858f0befb09f26e236e69fa42e323abf74))
+
 ## [0.1.4](https://github.com/unfunco/gh-pin/compare/v0.1.3...v0.1.4) (2026-04-18)
 
 
