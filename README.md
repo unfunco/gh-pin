@@ -28,6 +28,9 @@ them to specific commit SHAs.
 gh pin
 ```
 
+The command is safe to run repeatedly. Workflow files are only rewritten when an
+action reference needs to change.
+
 Actions that are already pinned are left alone. Actions found in the shared pin
 list are updated to the curated SHA. If an action is not yet in the pin list,
 `gh pin` resolves the ref directly from GitHub when possible and still offers to
