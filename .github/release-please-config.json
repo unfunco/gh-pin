@@ -16,6 +16,11 @@
         {
           "hidden": false,
           "section": "🧹 Miscellaneous",
+          "type": "refactor"
+        },
+        {
+          "hidden": false,
+          "section": "🧹 Miscellaneous",
           "type": "docs"
         },
         {
