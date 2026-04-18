@@ -33,10 +33,6 @@ func (s *stubGitHubClient) DoWithContext(_ context.Context, _, path string, _ io
 	return json.Unmarshal(data, response)
 }
 
-func (s *stubGitHubClient) Post(_ string, _ io.Reader, _ any) error {
-	return nil
-}
-
 func TestActionRepository(t *testing.T) {
 	t.Parallel()
 
@@ -59,6 +55,64 @@ func TestActionRepository(t *testing.T) {
 			got, ok := actionRepository(tt.action)
 			if got != tt.want || ok != tt.ok {
 				t.Fatalf("actionRepository(%q) = (%q, %t), want (%q, %t)", tt.action, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+func TestParseUsesLine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		line       string
+		wantPrefix string
+		wantAction string
+		wantRef    string
+		wantOK     bool
+	}{
+		{
+			name:       "plain uses line",
+			line:       "      - uses: actions/checkout@v4",
+			wantPrefix: "      - uses: ",
+			wantAction: "actions/checkout",
+			wantRef:    "v4",
+			wantOK:     true,
+		},
+		{
+			name:       "quoted uses line",
+			line:       `      - uses: "actions/setup-go@v5"`,
+			wantPrefix: "      - uses: ",
+			wantAction: "actions/setup-go",
+			wantRef:    "v5",
+			wantOK:     true,
+		},
+		{
+			name:   "not a uses key",
+			line:   "      env: uses: actions/checkout@v4",
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			gotPrefix, gotAction, gotRef, gotOK := parseUsesLine(tt.line)
+			if gotPrefix != tt.wantPrefix || gotAction != tt.wantAction || gotRef != tt.wantRef || gotOK != tt.wantOK {
+				t.Fatalf(
+					"parseUsesLine(%q) = (%q, %q, %q, %t), want (%q, %q, %q, %t)",
+					tt.line,
+					gotPrefix,
+					gotAction,
+					gotRef,
+					gotOK,
+					tt.wantPrefix,
+					tt.wantAction,
+					tt.wantRef,
+					tt.wantOK,
+				)
 			}
 		})
 	}
@@ -131,5 +185,32 @@ func TestResolveActionKeepsExistingSHA(t *testing.T) {
 	}
 	if len(client.doCalls) != 0 {
 		t.Fatalf("resolveAction() unexpectedly called GitHub: %#v", client.doCalls)
+	}
+}
+
+func TestLookupCommitSHARejectsInvalidSHA(t *testing.T) {
+	t.Parallel()
+
+	client := &stubGitHubClient{
+		responses: map[string]any{
+			"repos/owner/action/commits/v1": map[string]string{"sha": "not-a-sha"},
+		},
+	}
+
+	a := app{github: client}
+	_, err := a.lookupCommitSHA(context.Background(), "owner/action", "owner/action", "v1")
+	if err == nil || !strings.Contains(err.Error(), "invalid SHA") {
+		t.Fatalf("lookupCommitSHA() error = %v, want invalid SHA error", err)
+	}
+}
+
+func TestFormatUsesLineSanitizesLabel(t *testing.T) {
+	t.Parallel()
+
+	sha := strings.Repeat("c", 40)
+	got := formatUsesLine("- uses: ", "actions/checkout", sha, "  release #1 \n candidate  ")
+	want := "- uses: actions/checkout@" + sha + " # release 1 candidate"
+	if got != want {
+		t.Fatalf("formatUsesLine() = %q, want %q", got, want)
 	}
 }
