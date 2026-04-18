@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.7](https://github.com/unfunco/gh-pin/compare/v0.1.6...v0.1.7) (2026-04-18)
+
+
+### 🐛 Bug fixes
+
+* Group refactors under miscellaneous ([#26](https://github.com/unfunco/gh-pin/issues/26)) ([ab123cc](https://github.com/unfunco/gh-pin/commit/ab123ccd5eb95c37d67b8192e3a0bbb35fdbffda))
+
+
+### 🧹 Miscellaneous
+
+* Simplify pinning flow and polish README ([#25](https://github.com/unfunco/gh-pin/issues/25)) ([ed3dda7](https://github.com/unfunco/gh-pin/commit/ed3dda706bdbbda327040d98255333c6a2763b5d))
+
 ## [0.1.6](https://github.com/unfunco/gh-pin/compare/v0.1.5...v0.1.6) (2026-04-18)
 
 
