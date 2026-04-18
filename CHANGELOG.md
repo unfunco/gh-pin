@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/unfunco/gh-pin/compare/v0.1.5...v0.1.6) (2026-04-18)
+
+
+### 🐛 Bug fixes
+
+* Skip release PR creation after releasing ([8dac9fd](https://github.com/unfunco/gh-pin/commit/8dac9fdb6bf05f1ce4964a4ee43dca8ef7146e5a))
+
 ## [0.1.5](https://github.com/unfunco/gh-pin/compare/v0.1.4...v0.1.5) (2026-04-18)
 
 
