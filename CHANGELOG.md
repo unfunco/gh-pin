@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.2](https://github.com/unfunco/gh-pin/compare/v0.1.1...v0.1.2) (2026-04-18)
+
+
+### 🧹 Miscellaneous
+
+* Add versioned user agent to pin list requests ([#19](https://github.com/unfunco/gh-pin/issues/19)) ([50f52a2](https://github.com/unfunco/gh-pin/commit/50f52a2dc82b20d1378b80dacf3034cb71d0f0fb))
+* Clarify repeated runs in README ([f72b6e4](https://github.com/unfunco/gh-pin/commit/f72b6e4a94766120aa269495ae859439a391930a))
+* Update pin list URL ([#18](https://github.com/unfunco/gh-pin/issues/18)) ([00c6914](https://github.com/unfunco/gh-pin/commit/00c6914466dcdfa35304f458bcb047c5ab63128c))
+
 ## [0.1.1](https://github.com/unfunco/gh-pin/compare/v0.1.0...v0.1.1) (2026-04-11)
 
 
