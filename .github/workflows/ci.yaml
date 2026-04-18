@@ -27,7 +27,8 @@ jobs:
 
   release_pr:
     name: Release PR?
-    needs: [ verify ]
+    needs: [ verify, release ]
+    if: needs.release.outputs.release_created != 'true'
     permissions:
       contents: write
       issues: write
