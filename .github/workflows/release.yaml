@@ -97,3 +97,8 @@ jobs:
         go_build_options: '-ldflags=-s -ldflags=-w -ldflags=-X=main.version=${{ steps.tag.outputs.value }}'
         go_version_file: go.mod
         release_tag: ${{ steps.tag.outputs.value }}
+    - name: Publish draft release
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RELEASE_TAG: ${{ steps.tag.outputs.value }}
+      run: gh release edit "$RELEASE_TAG" --draft=false

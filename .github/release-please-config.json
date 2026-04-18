@@ -24,7 +24,7 @@
           "type": "chore"
         }
       ],
-      "draft": false,
+      "draft": true,
       "extra-label": "automata 🤖,autorelease: pending,chore 🧹",
       "include-component-in-tag": false,
       "include-v-in-tag": true,
