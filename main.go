@@ -190,6 +190,9 @@ func (a app) processWorkflow(ctx context.Context, path string, pins map[string]p
 		if !ok {
 			continue
 		}
+		if looksLikeSHA(ref) {
+			continue
+		}
 
 		resolved, needsIssue, resolveErr := a.resolveAction(ctx, pins, repo, action, ref)
 		if resolveErr != nil {

@@ -166,6 +166,53 @@ func TestProcessWorkflowResolvesMissingActionLive(t *testing.T) {
 	}
 }
 
+func TestProcessWorkflowLeavesExistingPinUnchanged(t *testing.T) {
+	t.Parallel()
+
+	currentSHA := strings.Repeat("d", 40)
+	curatedSHA := strings.Repeat("e", 40)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ci.yml")
+	contents := "jobs:\n  test:\n    steps:\n      - uses: owner/action@" + currentSHA + " # v1\n"
+
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	client := &stubGitHubClient{}
+	a := app{
+		stdout: io.Discard,
+		stderr: io.Discard,
+		github: client,
+	}
+	pins := map[string]pin{
+		"owner/action": {
+			Action: "owner/action",
+			Tag:    "v2",
+			SHA:    curatedSHA,
+		},
+	}
+
+	missing, err := a.processWorkflow(context.Background(), path, pins)
+	if err != nil {
+		t.Fatalf("processWorkflow() error = %v", err)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("processWorkflow() missing = %#v, want none", missing)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(got) != contents {
+		t.Fatalf("workflow = %q, want unchanged %q", string(got), contents)
+	}
+	if len(client.doCalls) != 0 {
+		t.Fatalf("processWorkflow() unexpectedly called GitHub: %#v", client.doCalls)
+	}
+}
+
 func TestResolveActionKeepsExistingSHA(t *testing.T) {
 	t.Parallel()
 
