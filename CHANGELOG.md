@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.8](https://github.com/unfunco/gh-pin/compare/v0.1.7...v0.1.8) (2026-09-26)
+
+
+### 🧹 Miscellaneous
+
+* Add project status notice ([#31](https://github.com/unfunco/gh-pin/issues/31)) ([2b1172f](https://github.com/unfunco/gh-pin/commit/2b1172f0617e2401177fba76847bc7d8bb6bf01c))
+* Adopt reusable Go verification for PRs ([#29](https://github.com/unfunco/gh-pin/issues/29)) ([c44a0ba](https://github.com/unfunco/gh-pin/commit/c44a0babc37f7b1d9f715332e902bc03a0c6ff6c))
+
 ## [0.1.7](https://github.com/unfunco/gh-pin/compare/v0.1.6...v0.1.7) (2026-07-10)
 
 
