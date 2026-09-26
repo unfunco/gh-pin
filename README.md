@@ -4,6 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](https://opensource.org/licenses/MIT)
 
 > [!NOTE]
+> This project is no longer being developed. [github/gh-actions-lock](https://github.com/github/gh-actions-lock) now does this job better, so use that instead.
+
+> [!NOTE]
 > 🤖 Developed with AI assistance. On the spectrum from engineering to vibes,
 > this sits a bit further toward vibes: it works well and does what I want,
 > but edge cases may not all be satisfied. PRs have been reviewed for obvious
